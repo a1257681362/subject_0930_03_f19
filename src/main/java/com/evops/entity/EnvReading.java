@@ -8,7 +8,9 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 /**
  * 环境读数：一个点位一条（温度/湿度/照度同采）。
@@ -50,6 +52,18 @@ public class EnvReading {
     private String abnormalMetrics;
 
     private LocalDateTime readAt;
+
+    /**
+     * 归属日：提交时按展厅时区（hall.time_zone，空回落全馆默认时区）对 {@link #readAt}
+     * 归日得到，是日报分组的唯一键。原始采样时间 {@code readAt} 原样落库、永不改写。
+     */
+    private LocalDate readingDate;
+
+    /** 归日所用展厅时区（IANA），随读数固化——展厅日后改时区不改历史读数口径 */
+    private String readAtZone;
+
+    /** readAt 在 readAtZone 下的 UTC 绝对时刻（DST 重叠取较早偏移、间隙前推） */
+    private OffsetDateTime readAtInstant;
 
     private String inspector;
 

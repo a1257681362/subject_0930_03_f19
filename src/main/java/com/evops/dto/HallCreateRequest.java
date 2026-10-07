@@ -19,4 +19,10 @@ public class HallCreateRequest {
     /** 展厅保管员：事件关闭前须由其复核 */
     @NotBlank(message = "展厅保管员不能为空")
     private String custodian;
+
+    /**
+     * 设备/现场时区（IANA，如 America/New_York），可空：
+     * 空则回落 museum.time.default-hall-zone；读数跨零点归属按此时区归日。
+     */
+    private String timeZone;
 }

@@ -1,6 +1,7 @@
 package com.evops.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.evops.config.MuseumTimeProperties;
 import com.evops.dto.HallCreateRequest;
 import com.evops.dto.HallRelicRequest;
 import com.evops.entity.Hall;
@@ -59,6 +60,16 @@ public class HallService {
         hall.setName(req.getName());
         hall.setLocation(req.getLocation());
         hall.setCustodian(req.getCustodian());
+        // 设备/现场时区建档时校验为合法 IANA 时区，避免读数归属时才暴露
+        if (req.getTimeZone() != null && !req.getTimeZone().trim().isEmpty()) {
+            String zone = req.getTimeZone().trim();
+            try {
+                MuseumTimeProperties.parseZone(zone, "timeZone");
+            } catch (IllegalStateException e) {
+                throw new IllegalArgumentException(e.getMessage());
+            }
+            hall.setTimeZone(zone);
+        }
         hall.setStatus(HALL_ACTIVE);
         hallMapper.insert(hall);
         return hall;

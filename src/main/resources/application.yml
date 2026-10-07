@@ -33,6 +33,14 @@ spring:
 
 # 文物多角度影像归档（museum-2）
 museum:
+  # 全馆统一时间口径：业务取时按服务器时区，读数跨日归属按展厅时区（见 t_hall.time_zone）
+  time:
+    # 服务器声明时区：容器/JVM 时区被改动时业务取时仍以此为准，启动时核对 JVM 默认时区
+    server-zone: Asia/Shanghai
+    # 展厅未单独登记时区时的回落时区
+    default-hall-zone: Asia/Shanghai
+    # JVM 时区与 server-zone 不一致时是否拒绝启动（默认仅告警，巡检归属不依赖 JVM 时区）
+    fail-on-zone-mismatch: false
   image:
     # 内容寻址物理存储根目录（SHA-256 分桶），作废不删文件
     storage-root: ./data/images
@@ -60,6 +68,8 @@ museum:
     # 应用就绪后补生成到期巡检任务（重启场景），之后按固定间隔扫描
     generate-on-startup: true
     generate-interval-ms: 60000
+    # 启动就绪后为升级前缺 reading_date 的历史读数按展厅时区补归属（只补归属列，不改 read_at）
+    backfill-on-startup: true
   # 文物库房库位与密集架预约（museum-7）
   storage:
     # 预约保留时长（分钟）：超时未开工自动释放（已开工 MOVING 不释放）

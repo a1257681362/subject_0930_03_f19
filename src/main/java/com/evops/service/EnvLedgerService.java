@@ -17,9 +17,11 @@ import java.util.List;
 public class EnvLedgerService {
 
     private final EnvLedgerMapper ledgerMapper;
+    private final MuseumTimeProvider timeProvider;
 
-    public EnvLedgerService(EnvLedgerMapper ledgerMapper) {
+    public EnvLedgerService(EnvLedgerMapper ledgerMapper, MuseumTimeProvider timeProvider) {
         this.ledgerMapper = ledgerMapper;
+        this.timeProvider = timeProvider;
     }
 
     public void append(Long hallId, Long taskId, Long eventId,
@@ -34,7 +36,7 @@ public class EnvLedgerService {
         entry.setAction(action);
         entry.setBizNo(bizNo);
         entry.setSummary(summary);
-        entry.setOccurredAt(occurredAt == null ? LocalDateTime.now() : occurredAt);
+        entry.setOccurredAt(occurredAt == null ? timeProvider.now() : occurredAt);
         ledgerMapper.insert(entry);
     }
 

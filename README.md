@@ -288,6 +288,32 @@ mvn test
 | `POST /api/env-events/{id}/photos` | multipart 上传现场照片（内容寻址去重，关闭前至少一张） |
 | `POST /api/env-events/{id}/review` | 保管员复核：通过关闭 / 不通过退回处置中 |
 | `GET /api/env-ledgers?hallId=` | 环境台账（不传展厅为全馆；规则发布挂全馆） |
+| `GET /api/health/time` | 时间口径核对：JVM 默认时区、配置服务器时区、业务当前时间与 UTC 时刻 |
+| `POST /api/env-daily/freeze?hallId=&date=&frozenBy=` | 冻结某展厅某归属日照度日报首版（只追加快照） |
+| `POST /api/env-daily/correct` | 基于读数事实出更正版本（旧快照不覆盖；事实无变化拒绝） |
+| `GET /api/env-daily/latest` / `/api/env-daily/versions` / `/api/env-daily/versions/{v}` | 当前生效版 / 更正版本链 / 指定历史版本 |
+| `GET /api/env-daily/{id}/verify` | 快照内容哈希完整性校验（篡改统计列或读数事实均暴露） |
+| `POST /api/env-daily/backfill-reading-dates` | 升级前历史读数按展厅时区补归属（只补归属列，不改 `readAt`） |
+
+### 时间口径、跨零点归属与照度日报版本化
+
+- **三层时间口径分开核对**：① 设备/现场时区登记在展厅档案 `t_hall.time_zone`
+  （IANA 名，建档校验合法，空回落 `museum.time.default-hall-zone`）；② 服务器时间统一走
+  `MuseumTimeProvider`（按 `museum.time.server-zone` 取业务墙钟时间），启动时与 JVM 默认时区核对、
+  不一致告警（`fail-on-zone-mismatch=true` 可拒绝启动），`/api/health/time` 可随时排查；
+  ③ 报表分组键是读数上的 `reading_date`。
+- **跨零点归属只按展厅时区**：提交读数时以**原始采样墙钟时间**（请求 `readAt`，原样落库永不改写）
+  在展厅时区归日，写 `reading_date`；同时固化 `read_at_zone` 与 UTC 绝对时刻 `read_at_instant`。
+  上海 00:30 的读数即使服务器（UTC）还在前一天 16:30，也归次日——修复了"两天照度记录归到同一天"。
+- **夏令时确定性规则**：spring-forward 间隙（本地时间不存在）自动向前调整归当日；
+  fall-back 重叠（本地时间出现两次）取**较早一次**偏移（夜间巡检先经历的那一次）。
+- **闰日**：2024/2028-02-29 归 2/29，平年 2/28 23:30 不跨月，均有回归用例。
+- **照度日报只追加、更正出版本**：`t_env_daily_report` 按 `(hall_id, reading_date, report_version)`
+  唯一；首版 `FREEZE V1` 冻结统计 + 逐读数 JSON + SHA-256 内容哈希。发现归属/统计错误只能
+  **基于读数事实重算**出 `CORRECTION V2…`（`base_version_id/hash` 串链、必须填原因），
+  旧快照任何字段不更新不删除；事实未变化（哈希相同）拒绝出更正版——展示层不得改事实。
+- **历史报表不覆盖旧快照**：升级前缺 `reading_date` 的旧读数由补录流程按展厅时区补归属
+  （启动自动或手动接口，按行幂等、台账留痕），随后用更正版本修正受影响日报。
 
 ### 测试
 
@@ -296,6 +322,12 @@ mvn test
 恢复后再次超限另开新事件；关闭前缺处置人或缺照片均拒绝、保管员复核通过才关闭、驳回停留待处理；
 同点位纸/青铜同时越限分别成事件；十轮任务与环境台账全程标明规则版本可追溯；
 修复方案会签只完成一半时禁止开工、巡检侧任务与指标不受影响。
+
+`EnvReadingDateTest` / `EnvReadingTimezoneTest`（服务器时区设 UTC、展厅分设上海与纽约）覆盖：
+跨零点按展厅时区归日而不按 UTC 服务器日期；DST spring-forward 间隙前推、fall-back 重叠取较早偏移
+（纽约/柏林真实切换时刻）；2024/2028 闰日与平年日界；原始 `readAt` 原样落库且补 `reading_date`
+不改写；日报冻结/更正版本链/哈希防篡改（改统计列或读数事实均被 `verify` 发现）/
+升级前历史读数归属补录幂等。
 
 ## 文物借展协议与押运闭环（museum-6）
 

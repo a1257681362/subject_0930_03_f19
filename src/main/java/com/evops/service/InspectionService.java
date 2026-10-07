@@ -33,7 +33,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -78,6 +80,7 @@ public class InspectionService {
     private final EnvLedgerService ledgerService;
     private final ImageStorage imageStorage;
     private final MuseumEnvProperties properties;
+    private final MuseumTimeProvider timeProvider;
 
     private final ReentrantLock generateLock = new ReentrantLock();
     private final AtomicBoolean startedUp = new AtomicBoolean(false);
@@ -92,7 +95,8 @@ public class InspectionService {
                              EnvRuleService ruleService,
                              EnvLedgerService ledgerService,
                              ImageStorage imageStorage,
-                             MuseumEnvProperties properties) {
+                             MuseumEnvProperties properties,
+                             MuseumTimeProvider timeProvider) {
         this.taskMapper = taskMapper;
         this.readingMapper = readingMapper;
         this.readingDetailMapper = readingDetailMapper;
@@ -104,6 +108,7 @@ public class InspectionService {
         this.ledgerService = ledgerService;
         this.imageStorage = imageStorage;
         this.properties = properties;
+        this.timeProvider = timeProvider;
     }
 
     // ================================================================
@@ -150,7 +155,7 @@ public class InspectionService {
             }
             List<EnvRuleItem> items = ruleService.listItems(active.getId());
             List<InspectionTask> generated = new ArrayList<>();
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = timeProvider.now();
             for (Hall hall : hallService.listHalls(HALL_ACTIVE)) {
                 try {
                     InspectionTask task = generateForHall(hall, active, items, now, force);
@@ -263,7 +268,14 @@ public class InspectionService {
                         Collectors.mapping(HallRelic::getMaterial, Collectors.toSet())));
 
         Set<String> taskPoints = new TreeSet<>(pointMaterials.keySet());
-        LocalDateTime readAt = req.getReadAt() == null ? LocalDateTime.now() : req.getReadAt();
+        // 未传采样时间时取【展厅时区】当前墙钟时间（不能拿服务器时区墙钟冒充展厅当地时间）
+        ZoneId hallZone = timeProvider.hallZone(hall.getTimeZone());
+        LocalDateTime readAt = req.getReadAt() == null
+                ? LocalDateTime.ofInstant(timeProvider.nowInstant(), hallZone)
+                : req.getReadAt();
+        // 归属日按展厅时区对原始采样墙钟时间归日：跨零点归属的唯一口径，readAt 原样落库
+        LocalDate readingDate = timeProvider.readingDate(readAt, hallZone);
+        String readAtZone = hallZone.getId();
         List<String> abnormalSummaries = new ArrayList<>();
 
         // 一轮任务必须覆盖展厅全部在展点位，且不允许同点位重复提交
@@ -348,6 +360,9 @@ public class InspectionService {
             reading.setAbnormal(abnormalUnion.isEmpty() ? 0 : 1);
             reading.setAbnormalMetrics(abnormalUnion.isEmpty() ? null : String.join(",", abnormalUnion));
             reading.setReadAt(readAt);
+            reading.setReadingDate(readingDate);
+            reading.setReadAtZone(readAtZone);
+            reading.setReadAtInstant(timeProvider.toInstant(readAt, hallZone).atOffset(java.time.ZoneOffset.UTC));
             reading.setInspector(req.getInspector());
             readingMapper.insert(reading);
             for (EnvReadingDetail d : details) {
@@ -400,7 +415,7 @@ public class InspectionService {
 
         task.setStatus(TASK_DONE);
         task.setInspector(req.getInspector());
-        task.setFinishedAt(LocalDateTime.now());
+        task.setFinishedAt(timeProvider.now());
         taskMapper.updateById(task);
         log.info("巡检任务 {} 完成，异常：{}", task.getTaskNo(),
                 abnormalSummaries.isEmpty() ? "无" : String.join("、", abnormalSummaries));
@@ -569,7 +584,7 @@ public class InspectionService {
                 && event.getHandler() != null && !event.getHandler().trim().isEmpty()) {
             throw new IllegalArgumentException("事件" + event.getEventNo() + "已登记处置人，不能重复登记");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
         event.setHandler(req.getHandler());
         event.setHandleRemark(req.getHandleRemark());
         event.setHandledAt(now);
@@ -649,7 +664,7 @@ public class InspectionService {
         photoFile.setFileSize(stored.size);
         photoFile.setWidthPx(stored.width);
         photoFile.setHeightPx(stored.height);
-        photoFile.setShotAt(LocalDateTime.now());
+        photoFile.setShotAt(timeProvider.now());
         photoFile.setPhotographer(uploadedBy.trim());
         photoFile.setRefCount(1);
         try {
@@ -672,7 +687,7 @@ public class InspectionService {
     @Transactional
     public EnvEvent review(Long eventId, EventReviewRequest req) {
         EnvEvent event = requireEvent(eventId);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = timeProvider.now();
         if (!EVENT_RESOLVED.equals(event.getStatus())) {
             throw new IllegalArgumentException("事件" + event.getEventNo()
                     + "指标尚未恢复正常或不在待复核状态（当前 " + event.getStatus()

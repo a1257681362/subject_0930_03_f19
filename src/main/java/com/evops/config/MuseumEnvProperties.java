@@ -27,4 +27,10 @@ public class MuseumEnvProperties {
 
     /** 任务生成定时扫描间隔（毫秒） */
     private long generateIntervalMs = 60000;
+
+    /**
+     * 启动就绪后是否对升级前缺 reading_date 的历史读数按展厅时区补归属。
+     * 补录只加归属列、不改 read_at；按行幂等。
+     */
+    private boolean backfillOnStartup = true;
 }

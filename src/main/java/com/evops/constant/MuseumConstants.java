@@ -183,6 +183,10 @@ public final class MuseumConstants {
     public static final String ACTION_EVENT_HANDLE = "EVENT_HANDLE";
     public static final String ACTION_EVENT_REVIEW_REJECT = "EVENT_REVIEW_REJECT";
     public static final String ACTION_EVENT_CLOSE = "EVENT_CLOSE";
+    /** 照度日报首版冻结 / 更正版本（只追加，旧快照不覆盖）/ 历史读数归属补录 */
+    public static final String ACTION_ENV_DAILY_FREEZE = "DAILY_FREEZE";
+    public static final String ACTION_ENV_DAILY_CORRECT = "DAILY_CORRECT";
+    public static final String ACTION_ENV_READING_DATE_BACKFILL = "READING_DATE_BACKFILL";
 
     // --------------------------------------------------------------------
     // museum-6 文物借展协议与押运闭环

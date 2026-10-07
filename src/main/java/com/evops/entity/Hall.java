@@ -23,6 +23,12 @@ public class Hall extends BaseEntity {
     /** 展厅保管员：事件关闭前须由其复核 */
     private String custodian;
 
+    /**
+     * 设备/现场时区（IANA，如 America/New_York）。
+     * 读数跨零点归属按此时区把原始采样墙钟时间归日；为空回落全馆默认时区。
+     */
+    private String timeZone;
+
     /** ACTIVE / CLOSED */
     private String status;
 }
