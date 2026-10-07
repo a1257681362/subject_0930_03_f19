@@ -20,8 +20,18 @@ public class ReadingSubmitRequest {
     @NotBlank(message = "巡检人不能为空")
     private String inspector;
 
-    /** 采样时间，缺省取当前时间 */
+    /**
+     * 采样时间（展厅设备本地挂钟时间），缺省取展厅设备时区当前时间。
+     * 原始挂钟值原样落库，永不改写。
+     */
     private LocalDateTime readAt;
+
+    /**
+     * 设备上报的采样当时相对 UTC 偏移分钟（可空）。
+     * 夏令时春季跳变/秋季回退等挂钟歧义时刻必须携带，用于确定唯一真实瞬时；
+     * 系统校验该偏移在采样时刻对展厅时区有效，无效即拒绝。
+     */
+    private Integer readOffsetMin;
 
     @NotEmpty(message = "读数不能为空")
     @Valid

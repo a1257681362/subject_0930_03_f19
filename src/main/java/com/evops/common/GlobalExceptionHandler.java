@@ -46,6 +46,19 @@ public class GlobalExceptionHandler {
         return ApiResponse.fail(firstFieldError(ex.getBindingResult().getFieldErrors()));
     }
 
+    /**
+     * 请求体不可读（含 museum-17 严格日期解析：如非闰年 2/29、夏令时非法组合等）。
+     * 明确拒绝，绝不把非法事实时间静默平移后落库。
+     */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ApiResponse<Void> handleNotReadable(
+            org.springframework.http.converter.HttpMessageNotReadableException ex) {
+        Throwable root = ex.getMostSpecificCause();
+        String msg = root == null ? ex.getMessage() : root.getMessage();
+        return ApiResponse.fail("请求参数中的时间/日期不合法（不存在的日期或格式错误），系统未采纳该时间: "
+                + (msg == null ? "" : msg));
+    }
+
     /** 数据库唯一约束兜底（编号唯一的最后一道防线） */
     @ExceptionHandler(DuplicateKeyException.class)
     public ApiResponse<Void> handleDuplicateKey(DuplicateKeyException ex) {

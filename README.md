@@ -39,10 +39,11 @@
 | `t_material_usage` / `t_material_usage_line` | 工单材料领用单与明细行：批号、计划/实际用量、部位、操作者（行内快照） |
 | `t_material_return` | 退料单，必须关联原领用单与原明细行，库存加回原批号 |
 | `t_material_review` | 用量差异复核，每条超阈值明细行全生命周期唯一一条（定时任务幂等锚点） |
-| `t_hall` / `t_hall_relic` | 展厅与在展陈展（点位+材质快照），巡检任务按展厅生成，撤展只置状态 |
+| `t_hall` / `t_hall_relic` | 展厅与在展陈展（点位+材质快照+**设备时区**），巡检任务按展厅生成，撤展只置状态 |
 | `t_env_rule_version` / `t_env_rule_item` | 环境巡检规则版本与材质条目（温湿度/照度阈值、采样频率），发布新版本旧版本置 `SUPERSEDED` 只追加 |
 | `t_inspection_task` | 巡检任务：按展厅一轮一行，固化规则版本快照，`(hall_id, round_no)` 幂等 |
-| `t_env_reading` / `t_env_reading_detail` | 点位读数与按材质判定明细：阈值/版本随读数固化，历史不随后续版本改写 |
+| `t_env_reading` / `t_env_reading_detail` | 点位读数与按材质判定明细：挂钟 `read_at` 不改写，瞬时 `read_at_epoch_milli`/偏移/`local_date` 按设备时区固化，历史不随后续版本改写 |
+| `t_env_lux_daily_report` / `_line` | 照度日报版本化快照（museum-17）：按设备时区归属日聚合，更正只出新版、旧版 `SUPERSEDED` 保留 |
 | `t_env_event` / `t_env_event_photo` | 异常事件（按展厅+点位+指标+材质归并连续超限）与现场照片，关闭须处置人+照片+保管员复核 |
 | `t_env_ledger` | 环境台账：规则发布/任务生成/读数/事件开闭处置复核全部只追加留痕、标明规则版本 |
 | `t_loan_agreement` / `t_loan_agreement_version` | 借展协议主单与版本：借展方/保险金额/运输路线/归还日期随版本固化，变更只追加新版本，已签版本置 `SUPERSEDED` 不覆盖 |
@@ -296,6 +297,11 @@ mvn test
 恢复后再次超限另开新事件；关闭前缺处置人或缺照片均拒绝、保管员复核通过才关闭、驳回停留待处理；
 同点位纸/青铜同时越限分别成事件；十轮任务与环境台账全程标明规则版本可追溯；
 修复方案会签只完成一半时禁止开工、巡检侧任务与指标不受影响。
+
+> **跨零点与夏令时（museum-17，见文末专节）**：读数日期归属只看**真实采样瞬时
+> 在展厅设备时区下的本地日期**（`t_env_reading.local_date`），与服务器/JVM 时区无关；
+> 原始挂钟 `read_at` 永不改写，真实瞬时 `read_at_epoch_milli` 与当时 UTC 偏移
+> `read_offset_min` 随事实固化；照度日报只追加版本化，历史报表只出更正版本不覆盖旧快照。
 
 ## 文物借展协议与押运闭环（museum-6）
 
@@ -1101,3 +1107,74 @@ Quartz 模拟触发 2024 报 SCHEDULED 日志；错误口径版本生成失败�
 旧批 REVOKED 保留；异常凭证两次追加序号 1/2 首份不被覆盖、范围外异常与已撤回报表拒绝追加；
 CSV 对 MAIN/EAST 馆区整行裁剪、REPORT_READER 对一级文物打码而 REPORT_ADMIN 见明文、
 未声明馆区拒绝导出。
+
+## 夜间巡检跨零点时区修复（museum-17）
+
+**问题**：夜间巡检跨过零点后，两天的照度记录被归到同一天。核对设备时区、服务器时间、
+报表分组键三处后定位根因：
+
+1. **设备时区从未登记**——`t_hall` 没有时区字段，巡检设备/巡检员上报的本地挂钟时间
+   没有归属时区；
+2. **服务器时间被误当事实时间**——代码各处直接 `LocalDateTime.now()`（JVM 默认时区），
+   既做任务调度又做缺省采样时间；
+3. **真实瞬时没有落库**——`read_at` 只存 JVM/服务器时区的挂钟值，报表只能对挂钟
+   `toLocalDate()` 按服务器默认时区切日。服务器换时区、或设备本地 00:30（UTC 还是
+   前一天）的夜间读数，就会被切错日期；夏令时、闰日同样无任何保障；
+4. 报表无版本化机制，错误快照只有"被覆盖"一条路。
+
+### 时间口径（设备时区 vs 服务器时间）
+
+- **设备时间**：每个展厅建档登记 IANA 设备时区（`t_hall.timezone`，默认
+  `museum.env.default-device-timezone`）。采样挂钟 `read_at` 是不可改写的原始事实；
+  提交时按设备时区换算并固化：`read_at_epoch_milli`（UTC 绝对瞬时）、
+  `read_zone`（设备时区）、`read_offset_min`（当时相对 UTC 偏移，夏令时证据）、
+  `local_date`（瞬时在设备时区下的本地日期＝**报表唯一分组键**）。
+- **服务器时间**：任务节拍、处置/复核等操作留痕统一走配置的
+  `museum.env.server-timezone`（留空取 JVM 默认时区）。**服务器时区绝不参与读数日期归属**。
+- **展示层不得改事实**：入参日期改 STRICT 解析，非闰年 2/29 这类不存在日期直接拒绝
+  （不再被 Jackson SMART 静默平移成 2/28）；设备时区更正只影响此后新读数，
+  历史读数的挂钟/瞬时/偏移/归属日期都不回溯改写，更正动作写 `t_env_ledger` 留痕。
+
+### 夏令时边界（不猜测瞬时）
+
+- 春季跳变**间隙**（如 Berlin 02:30 不存在）：无偏移或任何偏移都拒绝，要求设备带
+  当时 UTC 偏移重报；
+- 秋季回退**重叠**（02:30 出现两次）：无偏移拒绝擅自归属；设备带偏移校验有效后
+  确定唯一瞬时（+120→00:30Z、+60→01:30Z），两条同挂钟读数真实瞬时相差 1 小时；
+- 读数列表按 `read_at_epoch_milli` 而非重复挂钟排序。
+
+### 历史数据回填
+
+升级前只有挂钟 `read_at` 的历史读数，启动时由 `EnvReadingTimeBackfill` 按**各展厅登记
+的设备时区**用 JVM tzdata（含历史夏令时规则）幂等补齐四列；原始 `read_at` 不动，
+SQL 层不做时区猜测。
+
+### 照度日报（版本化冻结快照）
+
+`t_env_lux_daily_report`（头）+ `t_env_lux_daily_report_line`（点位明细）：
+按 `hall_id + local_date`（设备时区归属日）聚合读数；同展厅同归属日多版本，
+首版 `CURRENT`，修复历史报表**只追加更正版本**（须填更正原因），旧版置 `SUPERSEDED`
+连同明细行原样保留——不覆盖、不删除旧快照。并发更正由分条锁 + 事务保证只有一个 CURRENT。
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `POST /api/halls`（body 带 `timezone`）/ `POST /api/halls/{id}/timezone` | 展厅设备时区建档 / 更正（只影响新读数，历史留痕不回溯） |
+| `POST /api/inspection/tasks/{id}/readings`（可带 `readOffsetMin`） | 提交读数：挂钟原样落库 + 瞬时/偏移/归属日固化；DST 歧义时刻须带偏移 |
+| `POST /api/halls/{hallId}/lux-daily-reports` | 生成 v1 或更正版本（已存在 CURRENT 时 `reason` 必填） |
+| `GET /api/halls/{hallId}/lux-daily-reports?localDate=` | 某归属日全部版本（更正链可追溯） |
+| `GET /api/lux-daily-reports/{id}` | 单版本详情（含冻结的点位明细行） |
+| `GET /api/time/diagnosis` | 时区核对：服务器时区/当前时间、JVM 默认、默认设备时区、各厅设备当前时间 |
+
+配置：`museum.env.server-timezone`（操作/调度口径，默认取 JVM）、
+`museum.env.default-device-timezone`（展厅缺省设备时区，默认 Asia/Shanghai）。
+
+### 测试
+
+`EnvReadingTimezoneRegressionTest`（服务器时区刻意设 UTC，独立内存库）覆盖：
+Berlin 厅 23:30 与次日 00:30 分属两天（不按 UTC 并组）、上海厅 00:30 归属设备日；
+DST 春季间隙拒绝、秋季重叠无偏移拒绝、带偏移区分两个瞬时并固化偏移证据；
+2024 闰日 2/29 归属正确、非闰年 2023-02-29 严格拒绝不平移；
+原始 `read_at` 不改写、设备时区更正不回溯；日报 v1→更正 v2 后 v1 置 SUPERSEDED
+明细保留、无原因覆盖被拒；时区/日报动作全部写环境台账。
+`EnvReadingTimeBackfillTest` 覆盖升级前挂钟-only 历史行按设备时区幂等回填（含跨零点、
+DST 重叠宽口径），原始挂钟不改写。

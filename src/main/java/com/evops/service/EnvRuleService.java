@@ -28,13 +28,16 @@ public class EnvRuleService {
     private final EnvRuleVersionMapper versionMapper;
     private final EnvRuleItemMapper itemMapper;
     private final EnvLedgerService ledgerService;
+    private final MuseumClock clock;
 
     public EnvRuleService(EnvRuleVersionMapper versionMapper,
                           EnvRuleItemMapper itemMapper,
-                          EnvLedgerService ledgerService) {
+                          EnvLedgerService ledgerService,
+                          MuseumClock clock) {
         this.versionMapper = versionMapper;
         this.itemMapper = itemMapper;
         this.ledgerService = ledgerService;
+        this.clock = clock;
     }
 
     /**
@@ -49,7 +52,7 @@ public class EnvRuleService {
         }
         validateItems(req.getItems());
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = clock.nowServerWall();
         EnvRuleVersion oldActive = activeVersionEntity();
         if (oldActive != null) {
             // 旧版本只置状态、内容永不改写；引用旧版本的任务/读数仍指向旧版本

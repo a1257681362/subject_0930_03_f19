@@ -17,9 +17,11 @@ import java.util.List;
 public class EnvLedgerService {
 
     private final EnvLedgerMapper ledgerMapper;
+    private final MuseumClock clock;
 
-    public EnvLedgerService(EnvLedgerMapper ledgerMapper) {
+    public EnvLedgerService(EnvLedgerMapper ledgerMapper, MuseumClock clock) {
         this.ledgerMapper = ledgerMapper;
+        this.clock = clock;
     }
 
     public void append(Long hallId, Long taskId, Long eventId,
@@ -34,7 +36,8 @@ public class EnvLedgerService {
         entry.setAction(action);
         entry.setBizNo(bizNo);
         entry.setSummary(summary);
-        entry.setOccurredAt(occurredAt == null ? LocalDateTime.now() : occurredAt);
+        // 操作留痕统一服务器时区口径；业务动作（读数/事件）应显式传其采样/发生时间
+        entry.setOccurredAt(occurredAt == null ? clock.nowServerWall() : occurredAt);
         ledgerMapper.insert(entry);
     }
 

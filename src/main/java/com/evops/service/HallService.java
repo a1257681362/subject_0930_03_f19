@@ -33,19 +33,25 @@ public class HallService {
     private final InvTaskMapper invTaskMapper;
     private final InvDiffOrderMapper invDiffOrderMapper;
     private final InvLedgerService invLedgerService;
+    private final MuseumClock clock;
+    private final EnvLedgerService envLedgerService;
 
     public HallService(HallMapper hallMapper,
                        HallRelicMapper hallRelicMapper,
                        RelicService relicService,
                        InvTaskMapper invTaskMapper,
                        InvDiffOrderMapper invDiffOrderMapper,
-                       InvLedgerService invLedgerService) {
+                       InvLedgerService invLedgerService,
+                       MuseumClock clock,
+                       EnvLedgerService envLedgerService) {
         this.hallMapper = hallMapper;
         this.hallRelicMapper = hallRelicMapper;
         this.relicService = relicService;
         this.invTaskMapper = invTaskMapper;
         this.invDiffOrderMapper = invDiffOrderMapper;
         this.invLedgerService = invLedgerService;
+        this.clock = clock;
+        this.envLedgerService = envLedgerService;
     }
 
     @Transactional
@@ -54,13 +60,38 @@ public class HallService {
                 .eq(Hall::getHallNo, req.getHallNo())) > 0) {
             throw new IllegalArgumentException("展厅编号已存在: " + req.getHallNo());
         }
+        // 设备时区建档即固化并校验 IANA 合法性；采样挂钟时间此后一律按此时区解释
+        String timezone = clock.deviceZone(req.getTimezone()).getId();
         Hall hall = new Hall();
         hall.setHallNo(req.getHallNo());
         hall.setName(req.getName());
         hall.setLocation(req.getLocation());
         hall.setCustodian(req.getCustodian());
+        hall.setTimezone(timezone);
         hall.setStatus(HALL_ACTIVE);
         hallMapper.insert(hall);
+        return hall;
+    }
+
+    /**
+     * 更正展厅设备时区：仅影响此后新读数的解释口径；历史读数已固化各自的
+     * read_zone/read_at_epoch_milli/local_date，绝不回溯改写。更正动作写环境台账留痕。
+     */
+    @Transactional
+    public Hall updateTimezone(Long hallId, String timezone) {
+        Hall hall = requireHall(hallId);
+        String normalized = clock.deviceZone(timezone).getId();
+        if (normalized.equals(hall.getTimezone())) {
+            throw new IllegalArgumentException("展厅【" + hall.getHallNo() + "】设备时区已是 " + normalized);
+        }
+        String oldZone = hall.getTimezone();
+        hall.setTimezone(normalized);
+        hallMapper.updateById(hall);
+        envLedgerService.append(hallId, null, null, null, null,
+                ACTION_HALL_TIMEZONE_CHANGE, hall.getHallNo(),
+                "展厅设备时区由 " + oldZone + " 更正为 " + normalized
+                        + "；仅影响此后新读数日期归属，历史读数时区与归属日期不回溯改写",
+                clock.nowServerWall());
         return hall;
     }
 

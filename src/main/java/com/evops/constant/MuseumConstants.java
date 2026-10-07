@@ -185,6 +185,21 @@ public final class MuseumConstants {
     public static final String ACTION_EVENT_CLOSE = "EVENT_CLOSE";
 
     // --------------------------------------------------------------------
+    // museum-17 夜间巡检跨零点：设备时区 + 真实瞬时落库 + 日报版本化
+    // --------------------------------------------------------------------
+
+    /** 照度日报快照状态：CURRENT 当前口径版本 / SUPERSEDED 已被更正版本取代（旧快照保留不覆盖） */
+    public static final String LUX_REPORT_CURRENT = "CURRENT";
+    public static final String LUX_REPORT_SUPERSEDED = "SUPERSEDED";
+
+    /** 环境台账流水动作：照度日报生成 / 更正版本生成 */
+    public static final String ACTION_LUX_DAILY_PUBLISH = "LUX_DAILY_PUBLISH";
+    public static final String ACTION_LUX_DAILY_CORRECT = "LUX_DAILY_CORRECT";
+
+    /** 环境台账流水动作：展厅设备时区更正（只影响新读数，历史不回溯） */
+    public static final String ACTION_HALL_TIMEZONE_CHANGE = "HALL_TIMEZONE_CHANGE";
+
+    // --------------------------------------------------------------------
     // museum-6 文物借展协议与押运闭环
     // --------------------------------------------------------------------
 

@@ -53,13 +53,18 @@ museum:
       ONE: EXTERNAL,INTERNAL,CUSTODIAN
       TWO: INTERNAL,EXTERNAL,CUSTODIAN
       THREE: INTERNAL,CUSTODIAN,EXTERNAL
-  # 展厅温湿度与照度巡检（museum-5）
+  # 展厅温湿度与照度巡检（museum-5 / museum-17 跨零点时区归属）
   env:
     # 展厅文物材质在生效规则中无匹配条目时的兜底采样频率（分钟）
     default-interval-min: 240
     # 应用就绪后补生成到期巡检任务（重启场景），之后按固定间隔扫描
     generate-on-startup: true
     generate-interval-ms: 60000
+    # 服务器时间口径（IANA 时区）：任务节拍与处置/复核等操作留痕统一按此时区；
+    # 留空取 JVM 默认时区。绝不用于读数日期归属（读数归属只看展厅设备时区）。
+    server-timezone: Asia/Shanghai
+    # 展厅未单独登记时区时的默认设备时区；采样挂钟时间按设备时区解释并换算真实瞬时落库
+    default-device-timezone: Asia/Shanghai
   # 文物库房库位与密集架预约（museum-7）
   storage:
     # 预约保留时长（分钟）：超时未开工自动释放（已开工 MOVING 不释放）

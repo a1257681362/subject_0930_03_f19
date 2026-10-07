@@ -4,6 +4,7 @@ import com.evops.common.ApiResponse;
 import com.evops.dto.HallCloseRequest;
 import com.evops.dto.HallCreateRequest;
 import com.evops.dto.HallRelicRequest;
+import com.evops.dto.HallTimezoneRequest;
 import com.evops.entity.Hall;
 import com.evops.entity.HallRelic;
 import com.evops.service.HallService;
@@ -49,6 +50,16 @@ public class HallController {
         detail.put("hall", hall);
         detail.put("onDisplay", hallService.listOnDisplay(id));
         return ApiResponse.ok(detail);
+    }
+
+    /**
+     * 更正展厅设备时区（museum-17）：只影响此后新读数；历史读数已固化各自的
+     * 时区/真实瞬时/归属日期，不回溯改写。留痕 t_env_ledger。
+     */
+    @PostMapping("/api/halls/{id}/timezone")
+    public ApiResponse<Hall> updateTimezone(@PathVariable Long id,
+                                            @Valid @RequestBody HallTimezoneRequest request) {
+        return ApiResponse.ok(hallService.updateTimezone(id, request.getTimezone()));
     }
 
     /** 文物上展厅陈展（按点位） */

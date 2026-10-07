@@ -34,6 +34,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -78,7 +79,7 @@ public class InspectionService {
     private final EnvLedgerService ledgerService;
     private final ImageStorage imageStorage;
     private final MuseumEnvProperties properties;
-
+    private final MuseumClock clock;
     private final ReentrantLock generateLock = new ReentrantLock();
     private final AtomicBoolean startedUp = new AtomicBoolean(false);
 
@@ -92,7 +93,8 @@ public class InspectionService {
                              EnvRuleService ruleService,
                              EnvLedgerService ledgerService,
                              ImageStorage imageStorage,
-                             MuseumEnvProperties properties) {
+                             MuseumEnvProperties properties,
+                             MuseumClock clock) {
         this.taskMapper = taskMapper;
         this.readingMapper = readingMapper;
         this.readingDetailMapper = readingDetailMapper;
@@ -103,6 +105,7 @@ public class InspectionService {
         this.ruleService = ruleService;
         this.ledgerService = ledgerService;
         this.imageStorage = imageStorage;
+        this.clock = clock;
         this.properties = properties;
     }
 
@@ -150,7 +153,8 @@ public class InspectionService {
             }
             List<EnvRuleItem> items = ruleService.listItems(active.getId());
             List<InspectionTask> generated = new ArrayList<>();
-            LocalDateTime now = LocalDateTime.now();
+            // 任务节拍/操作时间统一走服务器时区口径（与设备时区解耦）
+            LocalDateTime now = clock.nowServerWall();
             for (Hall hall : hallService.listHalls(HALL_ACTIVE)) {
                 try {
                     InspectionTask task = generateForHall(hall, active, items, now, force);
@@ -263,7 +267,15 @@ public class InspectionService {
                         Collectors.mapping(HallRelic::getMaterial, Collectors.toSet())));
 
         Set<String> taskPoints = new TreeSet<>(pointMaterials.keySet());
-        LocalDateTime readAt = req.getReadAt() == null ? LocalDateTime.now() : req.getReadAt();
+        // 采样挂钟时间缺省取"展厅设备时区当前时间"（而非 JVM/服务器时间）；
+        // 原始挂钟值原样保留，真实瞬时/偏移/归属日期按设备时区一次性换算固化
+        ZoneId deviceZone = clock.deviceZone(hall.getTimezone());
+        // 缺省采样时间：由当前真实瞬时直接构造（DST 重叠瞬间也无歧义）；
+        // 显式历史挂钟在夏令时跳变/重叠时刻须带设备偏移消歧，原始挂钟永不改写
+        MuseumClock.SampledAt sampledAt = req.getReadAt() == null
+                ? clock.sampleNow(deviceZone)
+                : clock.sample(req.getReadAt(), deviceZone, req.getReadOffsetMin());
+        LocalDateTime readAt = sampledAt.getWall();
         List<String> abnormalSummaries = new ArrayList<>();
 
         // 一轮任务必须覆盖展厅全部在展点位，且不允许同点位重复提交
@@ -347,7 +359,13 @@ public class InspectionService {
             reading.setUncoveredMaterials(uncovered.isEmpty() ? null : String.join("|", uncovered));
             reading.setAbnormal(abnormalUnion.isEmpty() ? 0 : 1);
             reading.setAbnormalMetrics(abnormalUnion.isEmpty() ? null : String.join(",", abnormalUnion));
+            // museum-17：原始挂钟不改写；同事务固化真实瞬时(UTC epoch)、设备时区、
+            // 当时偏移（夏令时证据）与设备时区归属日期（报表分组键）
             reading.setReadAt(readAt);
+            reading.setReadAtEpochMilli(sampledAt.getInstant().toEpochMilli());
+            reading.setReadZone(sampledAt.getZone().getId());
+            reading.setReadOffsetMin(sampledAt.getOffset().getTotalSeconds() / 60);
+            reading.setLocalDate(sampledAt.getLocalDate());
             reading.setInspector(req.getInspector());
             readingMapper.insert(reading);
             for (EnvReadingDetail d : details) {
@@ -400,7 +418,7 @@ public class InspectionService {
 
         task.setStatus(TASK_DONE);
         task.setInspector(req.getInspector());
-        task.setFinishedAt(LocalDateTime.now());
+        task.setFinishedAt(clock.nowServerWall());
         taskMapper.updateById(task);
         log.info("巡检任务 {} 完成，异常：{}", task.getTaskNo(),
                 abnormalSummaries.isEmpty() ? "无" : String.join("、", abnormalSummaries));
@@ -569,7 +587,7 @@ public class InspectionService {
                 && event.getHandler() != null && !event.getHandler().trim().isEmpty()) {
             throw new IllegalArgumentException("事件" + event.getEventNo() + "已登记处置人，不能重复登记");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = clock.nowServerWall();
         event.setHandler(req.getHandler());
         event.setHandleRemark(req.getHandleRemark());
         event.setHandledAt(now);
@@ -649,7 +667,7 @@ public class InspectionService {
         photoFile.setFileSize(stored.size);
         photoFile.setWidthPx(stored.width);
         photoFile.setHeightPx(stored.height);
-        photoFile.setShotAt(LocalDateTime.now());
+        photoFile.setShotAt(clock.nowServerWall());
         photoFile.setPhotographer(uploadedBy.trim());
         photoFile.setRefCount(1);
         try {
@@ -672,7 +690,7 @@ public class InspectionService {
     @Transactional
     public EnvEvent review(Long eventId, EventReviewRequest req) {
         EnvEvent event = requireEvent(eventId);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = clock.nowServerWall();
         if (!EVENT_RESOLVED.equals(event.getStatus())) {
             throw new IllegalArgumentException("事件" + event.getEventNo()
                     + "指标尚未恢复正常或不在待复核状态（当前 " + event.getStatus()
@@ -751,7 +769,8 @@ public class InspectionService {
         return readingMapper.selectList(new LambdaQueryWrapper<EnvReading>()
                 .eq(hallId != null, EnvReading::getHallId, hallId)
                 .eq(taskId != null, EnvReading::getTaskId, taskId)
-                .orderByAsc(EnvReading::getReadAt)
+                // 按真实瞬时排序：夏令时秋季回退时本地挂钟会重复出现，挂钟排序不可靠
+                .orderByAsc(EnvReading::getReadAtEpochMilli)
                 .orderByAsc(EnvReading::getId));
     }
 

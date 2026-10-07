@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -49,7 +50,28 @@ public class EnvReading {
     /** 越限指标码并集逗号拼接 */
     private String abnormalMetrics;
 
+    /**
+     * 原始采样时间：设备/巡检员提交的展厅本地挂钟时间，永不改写（展示层不得改事实）。
+     */
     private LocalDateTime readAt;
+
+    /**
+     * 真实采样瞬时（UTC epoch 毫秒）：由 readAt 按展厅设备时区换算落库，
+     * 与 JVM/服务器时区无关；日期归属、跨天统计只认此瞬时。
+     */
+    private Long readAtEpochMilli;
+
+    /** 归属设备时区（IANA ID，采样当时展厅配置），随事实固化 */
+    private String readZone;
+
+    /** 采样当时相对 UTC 的偏移分钟（夏令时证据，标准时/夏令时各自不同） */
+    private Integer readOffsetMin;
+
+    /**
+     * 报表分组键：真实瞬时在 {@link #readZone} 下的本地日期。
+     * 夜间巡检跨零点据此分属两天；服务器/JVM 时区变化不影响。
+     */
+    private LocalDate localDate;
 
     private String inspector;
 
